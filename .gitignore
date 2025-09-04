@@ -1,0 +1,16 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment folders
+venv/
+myenv/
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+
+
