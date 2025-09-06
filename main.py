@@ -1,13 +1,11 @@
 import pandas as pd
-import time
-
 import plotly.express as px
 import streamlit as st
 import json
 import os
 
 # used to configure the layout and appearance of your Streamlit app before you render anything
-st.set_page_config(page_title="Finace Tracker", page_icon=" ", layout="wide")
+st.set_page_config(page_title="Finance Tracker", page_icon=" ", layout="wide")
 
 category_file = "categories.json"
 
@@ -33,7 +31,7 @@ def categorize_transactions(df):
 
         lowered_keywords = [keyword.lower().strip() for keyword in keywords]
 
-        for idx, row in df.itterrows():
+        for idx, row in df.iterrows():  # fixed typo here
             details = row["Details"].lower().strip()
 
             if details in lowered_keywords:
@@ -45,14 +43,31 @@ def categorize_transactions(df):
 def load_transactions(file):
     try:
         df = pd.read_csv(file)
-        df.columns = [col.strip() for col in df.columns]  # removes all leading spaces
+        df.columns = [
+            col.strip() for col in df.columns
+        ]  # removes all leading/trailing spaces
         df["Amount"] = df["Amount"].str.replace(",", "").astype(float)
         df["Date"] = pd.to_datetime(df["Date"], format="%d %b %Y")
 
         return categorize_transactions(df)
     except Exception as e:
-        st.error(f"Error proecessing file: {str(e)}")
+        st.error(f"Error processing file: {str(e)}")
         return None  # no data loaded
+
+
+def add_keyword_to_category(category, keyword):
+    if not category:
+        return False
+
+    keyword = keyword.strip()
+    st.session_state.categories.setdefault(category, [])
+
+    if keyword and keyword not in st.session_state.categories[category]:
+        st.session_state.categories[category].append(keyword)
+        save_categories()
+        return True
+
+    return False
 
 
 def main():
@@ -64,22 +79,87 @@ def main():
 
         if df is not None:
             debits_df = df[df["Debit/Credit"] == "Debit"].copy()
-            credits_df = df[df["Debit/Credit"] == "Debit"].copy()
+            credits_df = df[df["Debit/Credit"] == "Credit"].copy()
+
+            st.session_state.debits_df = debits_df.copy()
 
             tab1, tab2 = st.tabs(["Expenses (Debits)", "Payments (Credits)"])
             with tab1:
                 new_category = st.text_input("New Category Name")
                 add_button = st.button("Add Category")
 
-                if new_category not in st.session_state.categories:
-                    st.session_state.categories[new_category] = []
-                    save_categories()
-                    st.success(f"New Category Added: {new_category}")
-                    time.sleep(1)
-                    st.rerun()
+                if add_button and new_category:
+                    if new_category not in st.session_state.categories:
+                        st.session_state.categories[new_category] = []
+                        save_categories()
+                        st.rerun()
 
-                st.write(debits_df)
+                st.subheader("Your Expenses")
+                edited_df = st.data_editor(
+                    st.session_state.debits_df[
+                        ["Date", "Details", "Amount", "Category"]
+                    ],
+                    column_config={
+                        "Date": st.column_config.DateColumn(
+                            "Date", format="DD/MM/YYYY"
+                        ),
+                        "Amount": st.column_config.NumberColumn(
+                            "Amount", format="%.2f USD"
+                        ),
+                        "Category": st.column_config.SelectboxColumn(
+                            "Category", options=list(st.session_state.categories.keys())
+                        ),
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    key="category_editor",
+                )
+
+                save_button = st.button("Apply Changes", type="primary")
+                if save_button:
+                    for idx, row in edited_df.iterrows():
+                        new_category = row["Category"]
+                        if (
+                            new_category
+                            == st.session_state.debits_df.at[idx, "Category"]
+                        ):
+                            continue
+
+                        details = row["Details"]
+                        st.session_state.debits_df.at[idx, "Category"] = new_category
+                        add_keyword_to_category(new_category, details)
+
+                st.subheader("Expense Summary")
+                category_totals = (
+                    st.session_state.debits_df.groupby("Category")["Amount"]
+                    .sum()
+                    .reset_index()
+                )
+                category_totals = category_totals.sort_values("Amount", ascending=False)
+
+                st.dataframe(
+                    category_totals,
+                    column_config={
+                        "Amount": st.column_config.NumberColumn(
+                            "Amount", format="%.2f USD"
+                        )
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                fig = px.pie(
+                    category_totals,
+                    values="Amount",
+                    names="Category",
+                    title="Expenses by Category",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
             with tab2:
+                st.subheader("Payments Summary")
+                total_payments = credits_df["Amount"].sum()
+                st.metric("Total Payments", f"{total_payments:,.2f} AED")
                 st.write(credits_df)
 
 
